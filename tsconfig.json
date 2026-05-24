@@ -1,11 +1,10 @@
 {
   "compilerOptions": {
-    "target": "es2020",
-    "module": "commonjs",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
+    "lib": ["es2023"],
+    "module": "node20",
+    "target": "es2023",
     "skipLibCheck": true,
-    "resolveJsonModule": true
+    "outDir": "dist",
+    "types": ["node"]
   }
 }
