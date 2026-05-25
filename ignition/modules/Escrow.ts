@@ -1,7 +1,7 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 import { parseEther } from "viem";
 
-// Script usado apenas para teste
+// Script usado apenas para teste - deploy direto do contrato filho
 export default buildModule("EscrowModule", (m) => {
   // Defina os 3 parâmetros que o construtor da contrato Escrow exige
   
@@ -15,10 +15,9 @@ export default buildModule("EscrowModule", (m) => {
   const valorDoProjeto = parseEther("0.1");
 
   // Executa o deploy passando os 3 argumentos
-  // usamos o { value: valorDoProjeto } para que o contrato já nasça com esse saldo em ETH guardado nele.
-  const escrow = m.contract("Escrow", [enderecoContratante, enderecoPrestador, valorDoProjeto], {
-    value: valorDoProjeto, 
-  });
+  // feito os teste, não vamos mais usar o {value: valorDoProjeto} pois quem envia ETH para o contrato é a funcao DEPOSITAR
+  // entao nao faz sentido criar o contrato e ja enviar o ETH para ele
+  const escrow = m.contract("Escrow", [enderecoContratante, enderecoPrestador, valorDoProjeto]);
 
   return { escrow };
 });
