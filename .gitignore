@@ -8,6 +8,7 @@
 /bundle
 
 # Hardhat Build Artifacts
+ignition/deployments/chain-31337/
 /artifacts
 
 # Hardhat compilation (v2) support directory

@@ -18,7 +18,7 @@ contract EscrowFactory {
         uint256 valor
     );
 
-    function criaEscrow(address _prestador, uint256 _valor) public payable {
+    function criaEscrow(address _prestador, uint256 _valor) public {
         address contratanteAtual = msg.sender;
 
         // Implementa mais seguranca ao criar o contrato

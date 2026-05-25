@@ -28,7 +28,7 @@ contract Escrow {
     }
 
     modifier somenteContratante {
-        require(msg.sender == contratante, "Somente o contrante pode chamar essa funcao!");
+        require(msg.sender == contratante, "Somente o contratante pode chamar essa funcao!");
         _;  
     }
 
