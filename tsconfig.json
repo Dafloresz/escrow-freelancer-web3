@@ -5,6 +5,6 @@
     "target": "es2023",
     "skipLibCheck": true,
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["hardhat/types", "mocha", "chai", "node"]
   }
 }
