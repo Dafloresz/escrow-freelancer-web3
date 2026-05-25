@@ -16,6 +16,10 @@ contract Escrow {
     uint256 public dataEntrega = 0;
     uint256 public dataDeposito = 0;
 
+    event ServicoDepositado(address indexed contratante, uint256 valor, uint256 timestamp);
+    event ServicoEntregue(address indexed prestador, uint256 timestamp);
+    event PagamentoRealizado(address indexed prestador, uint256 valor);
+
 
     modifier somentePrestador {
         require(msg.sender == prestador, "Somente o prestador pode chamar essa funcao!");
@@ -24,8 +28,7 @@ contract Escrow {
 
     modifier somenteContratante {
         require(msg.sender == contratante, "Somente o contrante pode chamar essa funcao!");
-        _;
-        
+        _;  
     }
 
     constructor(address _contratante, address _prestador, uint256 _valor) {
@@ -40,12 +43,14 @@ contract Escrow {
         require(msg.value == valor, "Dinheiro Insuficiente");
         estado = Estado.DEPOSITADO;
         dataDeposito = block.timestamp;
+        emit ServicoDepositado(contratante, msg.value, block.timestamp);
     }
 
     function entregarServico() public somentePrestador {
         require(estado == Estado.DEPOSITADO, "Dinheiro ainda nao estar depositado");
         estado = Estado.ENTREGUE;
         dataEntrega = block.timestamp;
+        emit ServicoEntregue(prestador, block.timestamp);
     }
 
     // O contratante aprova o serviço e libera o dinheiro para o prestador
@@ -54,8 +59,10 @@ contract Escrow {
 
         // Atualiza o estado antes de transferir evitando ataque de reentrada
         estado = Estado.FINALIZADO;
-        (bool sucesso, ) = payable(prestador).call{value: address(this).balance}("");
+        uint256 saldo = address(this).balance;
+        (bool sucesso, ) = payable(prestador).call{value: saldo}("");
         require(sucesso, "A transferencia falhou!");
+        emit PagamentoRealizado(prestador, saldo);
         
     }
 
@@ -65,7 +72,9 @@ contract Escrow {
         require(block.timestamp >= dataEntrega + 3 days, "Prazo de 3 dias nao expirou");
         estado = Estado.FINALIZADO;
 
-        (bool sucesso, ) = payable(prestador).call{value: address(this).balance}("");
+        uint256 saldo = address(this).balance;
+        (bool sucesso, ) = payable(prestador).call{value: saldo}("");
         require(sucesso, "A transferencia falhou!");
+        emit PagamentoRealizado(prestador, saldo);
     }
 }
