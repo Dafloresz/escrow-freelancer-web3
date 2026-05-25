@@ -11,8 +11,27 @@ contract EscrowFactory {
     // Mapping para acahr os escrows de um usuario específico
     mapping(address => address[]) public escrowUsuario;
 
-    function criaEscrow(address _prestador, uint256 _valor) public {
+    event EscrowCriado(
+        address indexed contratante,
+        address indexed prestador,
+        address escrow,
+        uint256 valor
+    );
+
+    function criaEscrow(address _prestador, uint256 _valor) public payable {
         address contratanteAtual = msg.sender;
+
+        // Implementa mais seguranca ao criar o contrato
+        // evita que alguem passe um endereco invalido, podendo ter ETH preso para sempre no contrato
+        require(_prestador != address(0), "Endereco do prestador invalido!");
+
+        // evita de alguem depositar e aprovar o proprio servico, usando a plataforma como lavagem de dinheiro
+        require(_prestador != msg.sender, "Contratante e prestador nao podem ser o mesmo!");
+
+        // evita de alguem criar um servico que nao vale nada
+        require(_valor > 0, "O valor do servico deve ser maior que zero!");
+
+        // cria nosso contrato Escrow
         Escrow escrow = new Escrow(contratanteAtual, _prestador, _valor);
 
         // pega o endereço do escrow que acabamos de criar
@@ -26,6 +45,8 @@ contract EscrowFactory {
 
         // salva na lista específica de quem vai receber (prestador)
         escrowUsuario[_prestador].push(enderecoEscrow);
+
+        emit EscrowCriado(msg.sender, _prestador, enderecoEscrow, _valor);
     }
 
     // retorna todos os escrows criados na plataforma
