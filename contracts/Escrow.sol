@@ -19,6 +19,7 @@ contract Escrow {
     event ServicoDepositado(address indexed contratante, uint256 valor, uint256 timestamp);
     event ServicoEntregue(address indexed prestador, uint256 timestamp);
     event PagamentoRealizado(address indexed prestador, uint256 valor);
+    event ReembolsoRealizado(address indexed contratante, uint256 valor);
 
 
     modifier somentePrestador {
@@ -76,5 +77,17 @@ contract Escrow {
         (bool sucesso, ) = payable(prestador).call{value: saldo}("");
         require(sucesso, "A transferencia falhou!");
         emit PagamentoRealizado(prestador, saldo);
+    }
+
+    // Contratante se reembolsa se o prestador sumir por mais de 30 dias após o depósito
+    function reembolsar() public somenteContratante {
+        require(estado == Estado.DEPOSITADO, "Nao tem deposito para reembolsar!");
+        require(block.timestamp >= dataDeposito + 30 days, "Aguarde 30 dias para poder reembolsar!");
+
+        estado = Estado.FINALIZADO;
+        uint256 saldo = address(this).balance;
+        (bool sucesso, ) = payable(contratante).call{value: saldo}("");
+        require(sucesso, "A transferencia falhou!");
+        emit ReembolsoRealizado(contratante, saldo);
     }
 }
