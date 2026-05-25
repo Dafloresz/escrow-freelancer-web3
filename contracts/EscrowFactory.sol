@@ -11,9 +11,9 @@ contract EscrowFactory {
     // Mapping para acahr os escrows de um usuario específico
     mapping(address => address[]) public escrowUsuario;
 
-    function criaEscrow(address _prestador, uint256 _valor) public {
+    function criaEscrow(address _prestador, uint256 _valor) public payable {
         address contratanteAtual = msg.sender;
-        Escrow escrow = new Escrow(contratanteAtual, _prestador, _valor);
+        Escrow escrow = new Escrow{value: msg.value}(contratanteAtual, _prestador, _valor);
 
         // pega o endereço do escrow que acabamos de criar
         address enderecoEscrow = address(escrow);
