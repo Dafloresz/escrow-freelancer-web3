@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import hre from "hardhat";
 import { parseEther, type Address } from "viem";
 
+function toBigInt(value: unknown): bigint {
+  return BigInt(value as string);
+}
+
 const Estado = {
   CRIADO: 0,
   ACEITO: 1,
@@ -12,22 +16,32 @@ const Estado = {
   EM_DISPUTA: 5,
 } as const;
 
+const VALOR = parseEther("1");
+
 async function deployFactory() {
   const { viem, networkHelpers } = await hre.network.create();
   const [contratante, prestador, arbitro, terceiro] = await viem.getWalletClients();
   const publicClient = await viem.getPublicClient();
+
   const factory = await viem.deployContract("EscrowFactory");
 
-  return { viem, networkHelpers, publicClient, contratante, prestador, arbitro, terceiro, factory };
+  // Deploy do token ERC20 falso para testes — mintamos direto para o contratante
+  const token = await viem.deployContract("MockERC20", [
+    "Mock Token",
+    "MTK",
+    contratante.account!.address,
+    parseEther("1000"), // saldo inicial do contratante
+  ]);
+
+  return { viem, networkHelpers, publicClient, contratante, prestador, arbitro, terceiro, factory, token };
 }
 
 async function deployFactoryComEscrow() {
   const base = await deployFactory();
-  const { viem, factory, contratante, prestador, arbitro } = base;
-  const valor = parseEther("1");
+  const { viem, factory, contratante, prestador, arbitro, token } = base;
 
   await factory.write.criaEscrow(
-    [prestador.account!.address, arbitro.account!.address, valor],
+    [prestador.account!.address, arbitro.account!.address, token.address, VALOR],
     { account: contratante.account }
   );
 
@@ -35,19 +49,24 @@ async function deployFactoryComEscrow() {
   const escrowAddress = todosOsEscrows[0] as Address;
   const escrow = await viem.getContractAt("Escrow", escrowAddress);
 
-  return { ...base, escrow, escrowAddress, valor };
+  return { ...base, escrow, escrowAddress };
 }
 
-// Fixture que avança até o estado DEPOSITADO
+// Avança até DEPOSITADO — faz approve + depositar
 async function escrowDepositado() {
   const base = await deployFactoryComEscrow();
-  const { escrow, contratante, prestador, valor } = base;
+  const { escrow, contratante, prestador, token } = base;
+
   await escrow.write.aceitarContrato({ account: prestador.account });
-  await escrow.write.depositar({ account: contratante.account, value: valor });
+
+  // Contratante precisa aprovar o contrato Escrow a gastar seus tokens antes de depositar
+  await token.write.approve([escrow.address, VALOR], { account: contratante.account });
+  await escrow.write.depositar({ account: contratante.account });
+
   return base;
 }
 
-// Fixture que avança até o estado ENTREGUE
+// Avança até ENTREGUE
 async function escrowEntregue() {
   const base = await escrowDepositado();
   const { escrow, prestador } = base;
@@ -73,9 +92,9 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve criar um escrow e registrá-lo globalmente", async () => {
-      const { factory, contratante, prestador, arbitro } = await deployFactory();
+      const { factory, contratante, prestador, arbitro, token } = await deployFactory();
       await factory.write.criaEscrow(
-        [prestador.account!.address, arbitro.account!.address, parseEther("1")],
+        [prestador.account!.address, arbitro.account!.address, token.address, VALOR],
         { account: contratante.account }
       );
       const todos = await factory.read.exibirTodosEscrow();
@@ -83,9 +102,9 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve registrar o escrow para contratante e prestador", async () => {
-      const { factory, contratante, prestador, arbitro } = await deployFactory();
+      const { factory, contratante, prestador, arbitro, token } = await deployFactory();
       await factory.write.criaEscrow(
-        [prestador.account!.address, arbitro.account!.address, parseEther("1")],
+        [prestador.account!.address, arbitro.account!.address, token.address, VALOR],
         { account: contratante.account }
       );
 
@@ -103,10 +122,10 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve criar múltiplos escrows corretamente", async () => {
-      const { factory, contratante, prestador, arbitro } = await deployFactory();
+      const { factory, contratante, prestador, arbitro, token } = await deployFactory();
       for (let i = 0; i < 2; i++) {
         await factory.write.criaEscrow(
-          [prestador.account!.address, arbitro.account!.address, parseEther("0.5")],
+          [prestador.account!.address, arbitro.account!.address, token.address, VALOR],
           { account: contratante.account }
         );
       }
@@ -124,10 +143,10 @@ describe("EscrowFactory + Escrow", () => {
     // ── Validações de segurança ──────────────────────────────────────────────
 
     it("deve rejeitar prestador com endereço zero", async () => {
-      const { factory, contratante, arbitro } = await deployFactory();
+      const { factory, contratante, arbitro, token } = await deployFactory();
       await assert.rejects(
         factory.write.criaEscrow(
-          ["0x0000000000000000000000000000000000000000", arbitro.account!.address, parseEther("1")],
+          ["0x0000000000000000000000000000000000000000", arbitro.account!.address, token.address, VALOR],
           { account: contratante.account }
         ),
         /Endereco do prestador invalido/
@@ -135,21 +154,32 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve rejeitar arbitro com endereço zero", async () => {
-      const { factory, contratante, prestador } = await deployFactory();
+      const { factory, contratante, prestador, token } = await deployFactory();
       await assert.rejects(
         factory.write.criaEscrow(
-          [prestador.account!.address, "0x0000000000000000000000000000000000000000", parseEther("1")],
+          [prestador.account!.address, "0x0000000000000000000000000000000000000000", token.address, VALOR],
           { account: contratante.account }
         ),
         /Endereco do arbitro invalido/
       );
     });
 
-    it("deve rejeitar quando contratante e prestador são o mesmo", async () => {
-      const { factory, contratante, arbitro } = await deployFactory();
+    it("deve rejeitar token com endereço zero", async () => {
+      const { factory, contratante, prestador, arbitro } = await deployFactory();
       await assert.rejects(
         factory.write.criaEscrow(
-          [contratante.account!.address, arbitro.account!.address, parseEther("1")],
+          [prestador.account!.address, arbitro.account!.address, "0x0000000000000000000000000000000000000000", VALOR],
+          { account: contratante.account }
+        ),
+        /Endereco do token de pagamento invalido/
+      );
+    });
+
+    it("deve rejeitar quando contratante e prestador são o mesmo", async () => {
+      const { factory, contratante, arbitro, token } = await deployFactory();
+      await assert.rejects(
+        factory.write.criaEscrow(
+          [contratante.account!.address, arbitro.account!.address, token.address, VALOR],
           { account: contratante.account }
         ),
         /Contratante e prestador nao podem ser o mesmo/
@@ -157,10 +187,10 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve rejeitar quando arbitro é o contratante", async () => {
-      const { factory, contratante, prestador } = await deployFactory();
+      const { factory, contratante, prestador, token } = await deployFactory();
       await assert.rejects(
         factory.write.criaEscrow(
-          [prestador.account!.address, contratante.account!.address, parseEther("1")],
+          [prestador.account!.address, contratante.account!.address, token.address, VALOR],
           { account: contratante.account }
         ),
         /Arbitro deve ser um terceiro neutro/
@@ -168,10 +198,10 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve rejeitar quando arbitro é o prestador", async () => {
-      const { factory, contratante, prestador } = await deployFactory();
+      const { factory, contratante, prestador, token } = await deployFactory();
       await assert.rejects(
         factory.write.criaEscrow(
-          [prestador.account!.address, prestador.account!.address, parseEther("1")],
+          [prestador.account!.address, prestador.account!.address, token.address, VALOR],
           { account: contratante.account }
         ),
         /Arbitro deve ser um terceiro neutro/
@@ -179,10 +209,10 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve rejeitar valor zero", async () => {
-      const { factory, contratante, prestador, arbitro } = await deployFactory();
+      const { factory, contratante, prestador, arbitro, token } = await deployFactory();
       await assert.rejects(
         factory.write.criaEscrow(
-          [prestador.account!.address, arbitro.account!.address, 0n],
+          [prestador.account!.address, arbitro.account!.address, token.address, 0n],
           { account: contratante.account }
         ),
         /O valor do servico deve ser maior que zero/
@@ -195,8 +225,8 @@ describe("EscrowFactory + Escrow", () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("Escrow — deploy e estado inicial", () => {
-    it("deve configurar contratante, prestador, arbitro e valor corretamente", async () => {
-      const { escrow, contratante, prestador, arbitro, valor } = await deployFactoryComEscrow();
+    it("deve configurar contratante, prestador, arbitro, token e valor corretamente", async () => {
+      const { escrow, contratante, prestador, arbitro, token } = await deployFactoryComEscrow();
 
       assert.equal(
         (await escrow.read.contratante() as string).toLowerCase(),
@@ -210,7 +240,11 @@ describe("EscrowFactory + Escrow", () => {
         (await escrow.read.arbitro() as string).toLowerCase(),
         arbitro.account!.address.toLowerCase()
       );
-      assert.equal(await escrow.read.valor(), valor);
+      assert.equal(
+        (await escrow.read.tokenPagamento() as string).toLowerCase(),
+        token.address.toLowerCase()
+      );
+      assert.equal(await escrow.read.valor(), VALOR);
       assert.equal(await escrow.read.estado(), Estado.CRIADO);
     });
   });
@@ -257,54 +291,60 @@ describe("EscrowFactory + Escrow", () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("Escrow — depositar()", () => {
-    it("deve permitir que o contratante deposite após aceite", async () => {
-      const { escrow, contratante, prestador, valor } = await deployFactoryComEscrow();
+    it("deve permitir depósito após aceite com approve correto", async () => {
+      const { escrow, contratante, prestador, token } = await deployFactoryComEscrow();
       await escrow.write.aceitarContrato({ account: prestador.account });
-      await escrow.write.depositar({ account: contratante.account, value: valor });
+      await token.write.approve([escrow.address, VALOR], { account: contratante.account });
+      await escrow.write.depositar({ account: contratante.account });
       assert.equal(await escrow.read.estado(), Estado.DEPOSITADO);
     });
 
+    it("deve transferir os tokens do contratante para o escrow", async () => {
+      const { escrow, contratante, prestador, token } = await deployFactoryComEscrow();
+      await escrow.write.aceitarContrato({ account: prestador.account });
+      await token.write.approve([escrow.address, VALOR], { account: contratante.account });
+
+      const saldoAntes = toBigInt(await token.read.balanceOf([contratante.account!.address]));
+      await escrow.write.depositar({ account: contratante.account });
+      const saldoDepois = toBigInt(await token.read.balanceOf([contratante.account!.address]));
+
+      assert.equal(saldoAntes - saldoDepois, VALOR);
+      assert.equal(await token.read.balanceOf([escrow.address]), VALOR);
+    });
+
     it("deve rejeitar depósito sem aceite prévio", async () => {
-      const { escrow, contratante, valor } = await deployFactoryComEscrow();
+      const { escrow, contratante, token } = await deployFactoryComEscrow();
+      await token.write.approve([escrow.address, VALOR], { account: contratante.account });
       await assert.rejects(
-        escrow.write.depositar({ account: contratante.account, value: valor }),
+        escrow.write.depositar({ account: contratante.account }),
         /O prestador precisa aceitar o contrato primeiro/
       );
     });
 
-    it("deve rejeitar depósito feito por terceiros", async () => {
-      const { escrow, prestador, terceiro, valor } = await deployFactoryComEscrow();
+    it("deve rejeitar depósito sem approve", async () => {
+      const { escrow, contratante, prestador } = await deployFactoryComEscrow();
       await escrow.write.aceitarContrato({ account: prestador.account });
       await assert.rejects(
-        escrow.write.depositar({ account: terceiro.account, value: valor }),
+        escrow.write.depositar({ account: contratante.account }),
+        /ERC20InsufficientAllowance/
+      );
+    });
+
+    it("deve rejeitar depósito feito por terceiros", async () => {
+      const { escrow, prestador, terceiro, token } = await deployFactoryComEscrow();
+      await escrow.write.aceitarContrato({ account: prestador.account });
+      await token.write.approve([escrow.address, VALOR], { account: terceiro.account });
+      await assert.rejects(
+        escrow.write.depositar({ account: terceiro.account }),
         /Somente o contratante pode chamar essa funcao/
       );
     });
 
-    it("deve rejeitar depósito com valor insuficiente", async () => {
-      const { escrow, contratante, prestador } = await deployFactoryComEscrow();
-      await escrow.write.aceitarContrato({ account: prestador.account });
-      await assert.rejects(
-        escrow.write.depositar({ account: contratante.account, value: parseEther("0.5") }),
-        /Dinheiro Insuficiente/
-      );
-    });
-
-    it("deve rejeitar depósito com valor em excesso", async () => {
-      const { escrow, contratante, prestador } = await deployFactoryComEscrow();
-      await escrow.write.aceitarContrato({ account: prestador.account });
-      await assert.rejects(
-        escrow.write.depositar({ account: contratante.account, value: parseEther("2") }),
-        /Dinheiro Insuficiente/
-      );
-    });
-
     it("deve rejeitar segundo depósito após o primeiro", async () => {
-      const { escrow, contratante, prestador, valor } = await deployFactoryComEscrow();
-      await escrow.write.aceitarContrato({ account: prestador.account });
-      await escrow.write.depositar({ account: contratante.account, value: valor });
+      const { escrow, contratante, token } = await escrowDepositado();
+      await token.write.approve([escrow.address, VALOR], { account: contratante.account });
       await assert.rejects(
-        escrow.write.depositar({ account: contratante.account, value: valor }),
+        escrow.write.depositar({ account: contratante.account }),
         /O prestador precisa aceitar o contrato primeiro/
       );
     });
@@ -343,21 +383,21 @@ describe("EscrowFactory + Escrow", () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("Escrow — pagarPrestador()", () => {
-    it("deve transferir o saldo para o prestador ao aprovar", async () => {
-      const { escrow, publicClient, contratante, prestador } = await escrowEntregue();
+    it("deve transferir tokens para o prestador ao aprovar", async () => {
+      const { escrow, contratante, prestador, token } = await escrowEntregue();
 
-      const saldoAntes = await publicClient.getBalance({ address: prestador.account!.address });
+      const saldoAntes = toBigInt(await token.read.balanceOf([prestador.account!.address]));
       await escrow.write.pagarPrestador({ account: contratante.account });
-      const saldoDepois = await publicClient.getBalance({ address: prestador.account!.address });
+      const saldoDepois = toBigInt(await token.read.balanceOf([prestador.account!.address]));
 
-      assert.ok(saldoDepois > saldoAntes, "Saldo do prestador deve aumentar");
+      assert.equal(saldoDepois - saldoAntes, VALOR);
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
     });
 
-    it("deve zerar o saldo do contrato após o pagamento", async () => {
-      const { escrow, publicClient, contratante } = await escrowEntregue();
+    it("deve zerar o saldo de tokens do escrow após pagamento", async () => {
+      const { escrow, contratante, token } = await escrowEntregue();
       await escrow.write.pagarPrestador({ account: contratante.account });
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("deve rejeitar pagamento sem entrega prévia", async () => {
@@ -392,15 +432,15 @@ describe("EscrowFactory + Escrow", () => {
 
   describe("Escrow — pagarPorPrazoExpirado()", () => {
     it("deve permitir saque pelo prestador após 3 dias sem aprovação", async () => {
-      const { escrow, publicClient, prestador, networkHelpers } = await escrowEntregue();
+      const { escrow, prestador, token, networkHelpers } = await escrowEntregue();
 
       await networkHelpers.time.increase(3 * 24 * 60 * 60 + 1);
 
-      const saldoAntes = await publicClient.getBalance({ address: prestador.account!.address });
+      const saldoAntes = toBigInt(await token.read.balanceOf([prestador.account!.address]));
       await escrow.write.pagarPorPrazoExpirado({ account: prestador.account });
-      const saldoDepois = await publicClient.getBalance({ address: prestador.account!.address });
+      const saldoDepois = toBigInt(await token.read.balanceOf([prestador.account!.address]));
 
-      assert.ok(saldoDepois > saldoAntes, "Saldo do prestador deve aumentar");
+      assert.equal(saldoDepois - saldoAntes, VALOR);
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
     });
 
@@ -437,18 +477,18 @@ describe("EscrowFactory + Escrow", () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("Escrow — reembolsar()", () => {
-    it("deve permitir reembolso ao contratante após 30 dias sem entrega", async () => {
-      const { escrow, publicClient, contratante, networkHelpers } = await escrowDepositado();
+    it("deve reembolsar tokens ao contratante após 30 dias sem entrega", async () => {
+      const { escrow, contratante, token, networkHelpers } = await escrowDepositado();
 
       await networkHelpers.time.increase(30 * 24 * 60 * 60 + 1);
 
-      const saldoAntes = await publicClient.getBalance({ address: contratante.account!.address });
+      const saldoAntes = toBigInt(await token.read.balanceOf([contratante.account!.address]));
       await escrow.write.reembolsar({ account: contratante.account });
-      const saldoDepois = await publicClient.getBalance({ address: contratante.account!.address });
+      const saldoDepois = toBigInt(await token.read.balanceOf([contratante.account!.address]));
 
-      assert.ok(saldoDepois > saldoAntes, "Saldo do contratante deve aumentar");
+      assert.equal(saldoDepois - saldoAntes, VALOR);
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("deve rejeitar reembolso antes de 30 dias", async () => {
@@ -532,30 +572,30 @@ describe("EscrowFactory + Escrow", () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("Escrow — resolverDisputa()", () => {
-    it("deve pagar o prestador quando árbitro decide a favor dele", async () => {
-      const { escrow, publicClient, contratante, prestador, arbitro } = await escrowDepositado();
+    it("deve transferir tokens ao prestador quando árbitro decide a favor dele", async () => {
+      const { escrow, contratante, prestador, arbitro, token } = await escrowDepositado();
       await escrow.write.iniciarDisputa({ account: contratante.account });
 
-      const saldoAntes = await publicClient.getBalance({ address: prestador.account!.address });
+      const saldoAntes = toBigInt(await token.read.balanceOf([prestador.account!.address]));
       await escrow.write.resolverDisputa([true], { account: arbitro.account });
-      const saldoDepois = await publicClient.getBalance({ address: prestador.account!.address });
+      const saldoDepois = toBigInt(await token.read.balanceOf([prestador.account!.address]));
 
-      assert.ok(saldoDepois > saldoAntes, "Saldo do prestador deve aumentar");
+      assert.equal(saldoDepois - saldoAntes, VALOR);
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
-    it("deve reembolsar o contratante quando árbitro decide a favor dele", async () => {
-      const { escrow, publicClient, contratante, arbitro } = await escrowDepositado();
+    it("deve reembolsar tokens ao contratante quando árbitro decide a favor dele", async () => {
+      const { escrow, contratante, arbitro, token } = await escrowDepositado();
       await escrow.write.iniciarDisputa({ account: contratante.account });
 
-      const saldoAntes = await publicClient.getBalance({ address: contratante.account!.address });
+      const saldoAntes = toBigInt(await token.read.balanceOf([contratante.account!.address]));
       await escrow.write.resolverDisputa([false], { account: arbitro.account });
-      const saldoDepois = await publicClient.getBalance({ address: contratante.account!.address });
+      const saldoDepois = toBigInt(await token.read.balanceOf([contratante.account!.address]));
 
-      assert.ok(saldoDepois > saldoAntes, "Saldo do contratante deve aumentar");
+      assert.equal(saldoDepois - saldoAntes, VALOR);
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("deve rejeitar resolução por terceiros", async () => {
@@ -592,9 +632,9 @@ describe("EscrowFactory + Escrow", () => {
 
   describe("Escrow — eventos", () => {
     it("deve emitir EscrowCriado ao criar escrow", async () => {
-      const { factory, publicClient, contratante, prestador, arbitro } = await deployFactory();
+      const { factory, publicClient, contratante, prestador, arbitro, token } = await deployFactory();
       const hash = await factory.write.criaEscrow(
-        [prestador.account!.address, arbitro.account!.address, parseEther("1")],
+        [prestador.account!.address, arbitro.account!.address, token.address, VALOR],
         { account: contratante.account }
       );
       const recibo = await publicClient.waitForTransactionReceipt({ hash });
@@ -609,11 +649,10 @@ describe("EscrowFactory + Escrow", () => {
     });
 
     it("deve emitir ServicoDepositado ao depositar", async () => {
-      const { escrow, publicClient, contratante, valor } = await escrowDepositado();
-      const hash = await publicClient.getTransactionReceipt({
-        hash: (await publicClient.getBlock({ blockTag: "latest" })).transactions[0]
-      });
-      assert.equal(hash.logs.length > 0, true);
+      const { escrow, publicClient } = await escrowDepositado();
+      const block = await publicClient.getBlock({ blockTag: "latest" });
+      const recibo = await publicClient.getTransactionReceipt({ hash: block.transactions[0] });
+      assert.equal(recibo.logs.length > 0, true);
     });
 
     it("deve emitir DisputaIniciada ao iniciar disputa", async () => {
@@ -638,66 +677,65 @@ describe("EscrowFactory + Escrow", () => {
 
   describe("Fluxo completo", () => {
     it("ciclo normal: criar → aceitar → depositar → entregar → pagar", async () => {
-      const { escrow, publicClient, contratante, prestador, valor } =
-        await deployFactoryComEscrow();
+      const { escrow, contratante, prestador, token } = await deployFactoryComEscrow();
 
       assert.equal(await escrow.read.estado(), Estado.CRIADO);
 
       await escrow.write.aceitarContrato({ account: prestador.account });
       assert.equal(await escrow.read.estado(), Estado.ACEITO);
 
-      await escrow.write.depositar({ account: contratante.account, value: valor });
+      await token.write.approve([escrow.address, VALOR], { account: contratante.account });
+      await escrow.write.depositar({ account: contratante.account });
       assert.equal(await escrow.read.estado(), Estado.DEPOSITADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), valor);
+      assert.equal(await token.read.balanceOf([escrow.address]), VALOR);
 
       await escrow.write.entregarServico({ account: prestador.account });
       assert.equal(await escrow.read.estado(), Estado.ENTREGUE);
 
       await escrow.write.pagarPrestador({ account: contratante.account });
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("ciclo com prazo expirado: criar → aceitar → depositar → entregar → prazo → saque", async () => {
-      const { escrow, publicClient, networkHelpers } = await escrowEntregue();
+      const { escrow, prestador, token, networkHelpers } = await escrowEntregue();
 
       await networkHelpers.time.increase(3 * 24 * 60 * 60 + 1);
-      const { prestador } = await escrowEntregue();
       await escrow.write.pagarPorPrazoExpirado({ account: prestador.account });
 
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("ciclo com reembolso: criar → aceitar → depositar → 30 dias → reembolso", async () => {
-      const { escrow, publicClient, contratante, networkHelpers } = await escrowDepositado();
+      const { escrow, contratante, token, networkHelpers } = await escrowDepositado();
 
       await networkHelpers.time.increase(30 * 24 * 60 * 60 + 1);
       await escrow.write.reembolsar({ account: contratante.account });
 
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("ciclo com disputa — prestador vence", async () => {
-      const { escrow, publicClient, contratante, arbitro } = await escrowDepositado();
+      const { escrow, contratante, arbitro, token } = await escrowDepositado();
 
       await escrow.write.iniciarDisputa({ account: contratante.account });
       assert.equal(await escrow.read.estado(), Estado.EM_DISPUTA);
 
       await escrow.write.resolverDisputa([true], { account: arbitro.account });
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
 
     it("ciclo com disputa — contratante vence", async () => {
-      const { escrow, publicClient, contratante, arbitro } = await escrowEntregue();
+      const { escrow, contratante, arbitro, token } = await escrowEntregue();
 
       await escrow.write.iniciarDisputa({ account: contratante.account });
       await escrow.write.resolverDisputa([false], { account: arbitro.account });
 
       assert.equal(await escrow.read.estado(), Estado.FINALIZADO);
-      assert.equal(await publicClient.getBalance({ address: escrow.address }), 0n);
+      assert.equal(await token.read.balanceOf([escrow.address]), 0n);
     });
   });
 });
