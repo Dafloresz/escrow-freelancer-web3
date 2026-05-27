@@ -14,6 +14,7 @@ contract EscrowFactory {
     event EscrowCriado(
         address indexed contratante,
         address indexed prestador,
+        address indexed arbitro,
         address tokenPagamento,
         address escrow,
         uint256 valor
@@ -52,7 +53,7 @@ contract EscrowFactory {
         // salva na lista específica de quem vai receber (prestador)
         escrowUsuario[_prestador].push(enderecoEscrow);
 
-        emit EscrowCriado(msg.sender, _prestador, _tokenPagamento, enderecoEscrow, _valor);
+        emit EscrowCriado(msg.sender, _prestador, _arbitro, _tokenPagamento, enderecoEscrow, _valor);
     }
 
     // retorna todos os escrows criados na plataforma
