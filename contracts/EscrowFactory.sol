@@ -18,21 +18,25 @@ contract EscrowFactory {
         uint256 valor
     );
 
-    function criaEscrow(address _prestador, uint256 _valor) public {
+    function criaEscrow(address _prestador, address _arbitro, uint256 _valor) public {
         address contratanteAtual = msg.sender;
 
         // Implementa mais seguranca ao criar o contrato
         // evita que alguem passe um endereco invalido, podendo ter ETH preso para sempre no contrato
         require(_prestador != address(0), "Endereco do prestador invalido!");
+        require(_arbitro != address(0), "Endereco do arbitro invalido");
 
         // evita de alguem depositar e aprovar o proprio servico, usando a plataforma como lavagem de dinheiro
-        require(_prestador != msg.sender, "Contratante e prestador nao podem ser o mesmo!");
+        require(_prestador != contratanteAtual, "Contratante e prestador nao podem ser o mesmo!");
+
+        // garante que o arbitro não seja a carteira do prestador e do contratante
+        require(contratanteAtual != _arbitro && _prestador != _arbitro, "Arbitro deve ser um terceiro neutro");
 
         // evita de alguem criar um servico que nao vale nada
         require(_valor > 0, "O valor do servico deve ser maior que zero!");
 
         // cria nosso contrato Escrow
-        Escrow escrow = new Escrow(contratanteAtual, _prestador, _valor);
+        Escrow escrow = new Escrow(contratanteAtual, _prestador, _arbitro, _valor);
 
         // pega o endereço do escrow que acabamos de criar
         address enderecoEscrow = address(escrow);
