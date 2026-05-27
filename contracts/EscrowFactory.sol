@@ -14,17 +14,19 @@ contract EscrowFactory {
     event EscrowCriado(
         address indexed contratante,
         address indexed prestador,
+        address tokenPagamento,
         address escrow,
         uint256 valor
     );
 
-    function criaEscrow(address _prestador, address _arbitro, uint256 _valor) public {
+    function criaEscrow(address _prestador, address _arbitro, address _tokenPagamento, uint256 _valor) public {
         address contratanteAtual = msg.sender;
 
         // Implementa mais seguranca ao criar o contrato
         // evita que alguem passe um endereco invalido, podendo ter ETH preso para sempre no contrato
         require(_prestador != address(0), "Endereco do prestador invalido!");
         require(_arbitro != address(0), "Endereco do arbitro invalido");
+        require(_tokenPagamento != address(0), "Endereco do token de pagamento invalido!");
 
         // evita de alguem depositar e aprovar o proprio servico, usando a plataforma como lavagem de dinheiro
         require(_prestador != contratanteAtual, "Contratante e prestador nao podem ser o mesmo!");
@@ -36,7 +38,7 @@ contract EscrowFactory {
         require(_valor > 0, "O valor do servico deve ser maior que zero!");
 
         // cria nosso contrato Escrow
-        Escrow escrow = new Escrow(contratanteAtual, _prestador, _arbitro, _valor);
+        Escrow escrow = new Escrow(contratanteAtual, _prestador, _arbitro, _tokenPagamento, _valor);
 
         // pega o endereço do escrow que acabamos de criar
         address enderecoEscrow = address(escrow);
@@ -50,7 +52,7 @@ contract EscrowFactory {
         // salva na lista específica de quem vai receber (prestador)
         escrowUsuario[_prestador].push(enderecoEscrow);
 
-        emit EscrowCriado(msg.sender, _prestador, enderecoEscrow, _valor);
+        emit EscrowCriado(msg.sender, _prestador, _tokenPagamento, enderecoEscrow, _valor);
     }
 
     // retorna todos os escrows criados na plataforma
