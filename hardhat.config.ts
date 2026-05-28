@@ -1,5 +1,8 @@
 import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
 import { configVariable, defineConfig } from "hardhat/config";
+import * as dotenv from "dotenv"; // 1. IMPORTA O DOTENV
+
+dotenv.config(); // 2. ATIVA O DOTENV PARA LER O ARQUIVO .ENV
 
 export default defineConfig({
   plugins: [hardhatToolboxViemPlugin],
@@ -25,7 +28,6 @@ export default defineConfig({
       chainType: "l1",
       url: "http://127.0.0.1:8545",
     },
-    
     hardhatMainnet: {
       type: "edr-simulated",
       chainType: "l1",
@@ -37,8 +39,9 @@ export default defineConfig({
     sepolia: {
       type: "http",
       chainType: "l1",
-      url: configVariable("SEPOLIA_RPC_URL"),
-      accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
+      // Ajustado para bater exatamente com o que o configVariable vai buscar no seu .env
+      url: process.env.CHAVE_RPC_URL || "", 
+      accounts: process.env.CHAVE_PRIVADA_METAMASK ? [process.env.CHAVE_PRIVADA_METAMASK] : [],
     },
   },
 });
