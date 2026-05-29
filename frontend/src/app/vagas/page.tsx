@@ -3,12 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount } from 'wagmi'; // Importado para ler a carteira conectada
 import { supabase } from '@/lib/supabase';
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [vagas, setVagas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Captura o endereço conectado na MetaMask e o status de conexão
+  const { address, isConnected } = useAccount();
 
   useEffect(() => {
     setMounted(true);
@@ -86,48 +90,67 @@ export default function Home() {
         ) : (
           /* LISTA DE VAGAS REAIS */
           <div className="grid grid-cols-1 gap-4">
-            {vagas.map((vaga) => (
-              <div 
-                key={vaga.id} 
-                className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl hover:border-zinc-700 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-6"
-              >
-                <div className="space-y-2 max-w-2xl">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-xl font-bold text-zinc-100">{vaga.titulo}</h3>
-                    <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 uppercase font-medium">
-                      {vaga.status || 'aberta'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-zinc-400 line-clamp-2">{vaga.descricao}</p>
-                  
-                  {/* Endereço do Contratante cortadinho */}
-                  <div className="text-xs text-zinc-500 flex items-center gap-1 pt-1">
-                    <span>Contratante:</span>
-                    <span className="font-mono bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
-                      {vaga.contratante_address || vaga.contratante_addres ? 
-                        `${(vaga.contratante_address || vaga.contratante_addres).slice(0, 6)}...${(vaga.contratante_address || vaga.contratante_addres).slice(-4)}` 
-                        : 'Desconhecido'}
-                    </span>
-                  </div>
-                </div>
+            {vagas.map((vaga) => {
+              // Verifica se a carteira conectada é a dona desta vaga específica
+              const donoDaVaga = vaga.contratante_address || vaga.contratante_addres;
+              const isDono = isConnected && address && donoDaVaga && address.toLowerCase() === donoDaVaga.toLowerCase();
 
-                {/* Orçamento e Ação */}
-                <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center gap-4 border-t md:border-t-0 border-zinc-800 pt-4 md:pt-0">
-                  <div className="text-left md:text-right">
-                    <span className="text-xs text-zinc-500 block">Orçamento</span>
-                    <span className="text-2xl font-black text-blue-400 font-mono">
-                      {vaga.valor} <span className="text-sm font-normal text-zinc-400">USDC</span>
-                    </span>
+              return (
+                <div 
+                  key={vaga.id} 
+                  className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl hover:border-zinc-700 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-6"
+                >
+                  <div className="space-y-2 max-w-2xl">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-xl font-bold text-zinc-100">{vaga.titulo}</h3>
+                      <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 uppercase font-medium">
+                        {vaga.status || 'aberta'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-zinc-400 line-clamp-2">{vaga.descricao}</p>
+                    
+                    {/* Endereço do Contratante cortadinho */}
+                    <div className="text-xs text-zinc-500 flex items-center gap-1 pt-1">
+                      <span>Contratante:</span>
+                      <span className="font-mono bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                        {donoDaVaga ? 
+                          `${donoDaVaga.slice(0, 6)}...${donoDaVaga.slice(-4)}` 
+                          : 'Desconhecido'}
+                      </span>
+                    </div>
                   </div>
-                  
-                    <Link href={`/vagas/${vaga.id}`}>
-                     <button className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full">
-                        Candidatar-se
-                     </button>
-                    </Link>
+
+                  {/* Orçamento e Ações Dinâmicas */}
+                  <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center gap-4 border-t md:border-t-0 border-zinc-800 pt-4 md:pt-0">
+                    <div className="text-left md:text-right">
+                      <span className="text-xs text-zinc-500 block">Orçamento</span>
+                      <span className="text-2xl font-black text-blue-400 font-mono">
+                        {vaga.valor} <span className="text-sm font-normal text-zinc-400">USDC</span>
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 w-full md:w-auto">
+                      {/* EXCLUSIVO: Aparece o botão azul "Ver Propostas" se for o dono da vaga */}
+                      {isDono && (
+                        <Link href={`/vagas/${vaga.id}/propostas`} className="w-full md:w-auto">
+                          <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shadow-lg shadow-blue-600/10 whitespace-nowrap w-full">
+                            📬 Ver Propostas
+                          </button>
+                        </Link>
+                      )}
+
+                      {/* Botão Padrão de Detalhes / Candidatura */}
+                      <Link href={`/vagas/${vaga.id}`} className="w-full md:w-auto">
+                        <button className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full">
+                          Candidatar-se
+                        </button>
+                      </Link>
+                    </div>
+
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
