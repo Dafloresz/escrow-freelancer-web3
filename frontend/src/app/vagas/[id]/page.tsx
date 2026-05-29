@@ -116,7 +116,7 @@ export default function DetalhesVaga() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-50 flex flex-col">
-      {/* HEADER ATUALIZADO (ITEM 2) */}
+      {/* HEADER */}
       <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur px-6 py-4 flex items-center justify-between">
         <Link href="/" className="text-xl font-black tracking-tight text-zinc-100 hover:opacity-80 transition-opacity">
           Escrow Freelancer
@@ -162,22 +162,25 @@ export default function DetalhesVaga() {
           </div>
         </div>
 
-        {/* COLUNA DA DIREITA: FORMULÁRIO DINÂMICO OU MENU DO CONTRATANTE (ITEM 3) */}
+        {/* COLUNA DA DIREITA: PAINEL DINÂMICO (DONO DA VAGA VS FREELANCER) */}
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl h-fit space-y-5">
           
-          {IsDonoDaVaga ? (
-            /* CONTEXTO: CONTRATANTE LOGADO */
-            <div className="space-y-4">
-              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                <p className="text-xs text-blue-400 font-medium">✨ Você publicou este projeto</p>
+          {isConnected && IsDonoDaVaga ? (
+            /* CONTEXTO: CONTRATANTE LOGADO (DONO DA VAGA) */
+            <div className="space-y-4 py-1">
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-center">
+                <p className="text-xs text-blue-400 font-semibold">✨ Você é o criador deste projeto</p>
               </div>
               <h2 className="text-lg font-bold text-zinc-100">Painel de Controle</h2>
-              <p className="text-xs text-zinc-400">Gerencie candidatos, analise os prazos pedidos e trave o saldo na blockchain.</p>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Gerencie candidatos, analise os prazos pedidos e envie os fundos com segurança para o contrato de Escrow.
+              </p>
               
-              <Link href={`/vagas/${id}/propostas`} className="block w-full">
-                <button className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-700 font-medium py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
-                  📬 Ver Propostas Recebidas
-                </button>
+              <Link 
+                href={`/vagas/${id}/propostas`}
+                className="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/10"
+              >
+                📬 Ver Propostas Recebidas
               </Link>
             </div>
           ) : (
