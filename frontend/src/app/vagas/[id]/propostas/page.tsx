@@ -2,15 +2,26 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useAccount } from 'wagmi';
+import { useAccount, useWriteContract } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { parseUnits } from 'viem';
 import { supabase } from '@/lib/supabase';
+import { ESCROW_FACTORY_ADDRESS, ESCROW_FACTORY_ABI } from '@/contracts';
+
+// Endereço oficial do contrato USDC na rede Sepolia Testnet
+const USDC_SEPOLIA_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+
+// Endereço provisório para o Árbitro da plataforma (vamos usar apenas para teste)
+const ARBITRO_PADRAO = '0x9965507B1a0595C5411CC43f3d389616595F3333';
 
 export default function GerenciarPropostas() {
   const { id } = useParams();
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const [mounted, setMounted] = useState(false);
+
+  // Hook do Wagmi para escrita de contratos inteligentes
+  const { writeContractAsync } = useWriteContract();
 
   // Estados
   const [vaga, setVaga] = useState<any>(null);
@@ -54,9 +65,9 @@ export default function GerenciarPropostas() {
     }
   };
 
-  // Função que será conectada ao Smart Contract no Passo 2
+  // Função que executa a criação do Escrow na Blockchain e atualiza o Supabase
   const handleAceitarProposta = async (proposta: any) => {
-    if (!address) return;
+    if (!address || !vaga) return;
     
     // Segurança visual: garante que só o dono da vaga pode aceitar
     if (address.toLowerCase() !== vaga.contratante_address.toLowerCase()) {
@@ -67,16 +78,45 @@ export default function GerenciarPropostas() {
     try {
       setContratandoId(proposta.id);
       
-      // MENSAGEM PROVISÓRIA: No Passo 2 vamos trocar isso pela transação da Blockchain!
-      alert(`Pronto para integrar com a Web3!\n\nIremos abrir a MetaMask para depositar ${proposta.valor_proposto} USDC no Escrow para o freelancer:\n${proposta.freelancer_address}`);
+      // 1. Converter o valor proposto para a formatação do USDC (6 Casas Decimais)
+      // Exemplo: "150" vira 150000000 BigInt
+      const valorEmWeiUSDC = parseUnits(proposta.valor_proposto.toString(), 6);
+
+      // 2. Chamar o Contrato de Fábrica (EscrowFactory) via MetaMask
+      const txHash = await writeContractAsync({
+        address: ESCROW_FACTORY_ADDRESS,
+        abi: ESCROW_FACTORY_ABI,
+        functionName: 'criaEscrow',
+        args: [
+          proposta.freelancer_address as `0x${string}`, // _prestador
+          ARBITRO_PADRAO as `0x${string}`,               // _arbitro
+          USDC_SEPOLIA_ADDRESS as `0x${string}`,         // _tokenPagamento
+          valorEmWeiUSDC                                 // _valor (uint256)
+        ],
+      });
+
+      console.log('Transação enviada com sucesso! Hash:', txHash);
+      alert('Contrato Escrow criado na Blockchain! Aguardando mineração...');
       
-      // Exemplo de atualização no banco após o sucesso (futuro)
-      // await supabase.from('propostas').update({ status: 'aceita' }).eq('id', proposta.id);
-      // await supabase.from('vagas').update({ status: 'em_andamento' }).eq('id', id);
+      // 3. Atualizar estados no Supabase após a aprovação da carteira
+      await supabase
+        .from('propostas')
+        .update({ status: 'aceita' })
+        .eq('id', proposta.id);
+
+      await supabase
+        .from('vagas')
+        .update({ status: 'em_andamento' })
+        .eq('id', id);
+
+      alert('Contratação concluída e registrada com sucesso!');
+      
+      // Recarrega as informações na tela
+      carregarDadosVagaEPropostas();
 
     } catch (error: any) {
-      console.error(error);
-      alert('Erro ao processar contratação.');
+      console.error('Erro na transação Web3:', error);
+      alert(`Erro ao processar contratação: ${error.shortMessage || error.message || 'Verifique o console'}`);
     } finally {
       setContratandoId(null);
     }
@@ -164,7 +204,7 @@ export default function GerenciarPropostas() {
                       <button
                         onClick={() => handleAceitarProposta(proposta)}
                         disabled={contratandoId !== null || proposta.status !== 'pendente'}
-                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 text-white disabled:text-zinc-500 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors"
+                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 text-white disabled:text-zinc-500 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors min-w-[120px]"
                       >
                         {contratandoId === proposta.id ? 'Processando...' : proposta.status === 'pendente' ? 'Aceitar Proposta' : 'Encerrada'}
                       </button>
