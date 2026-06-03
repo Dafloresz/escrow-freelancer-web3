@@ -15,6 +15,7 @@ export default function DetalhesVaga() {
 
   // Estados dos dados
   const [vaga, setVaga] = useState<any>(null);
+  const [freelancerContratado, setFreelancerContratado] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
 
@@ -23,6 +24,7 @@ export default function DetalhesVaga() {
   const [valorPedido, setValorPedido] = useState('');
   const [prazoDias, setPrazoDias] = useState('');
   const [loadingProposta, setLoadingProposta] = useState(false);
+  const [loadingEntrega, setLoadingEntrega] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -32,14 +34,30 @@ export default function DetalhesVaga() {
   const buscarDetalhesVaga = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      
+      // 1. Busca os detalhes da vaga
+      const { data: dadosVaga, error: errorVaga } = await supabase
         .from('vagas')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (error) throw error;
-      setVaga(data);
+      if (errorVaga) throw errorVaga;
+      setVaga(dadosVaga);
+
+      // 2. Se a vaga não estiver aberta, busca qual freelancer foi aceito para ela
+      if (dadosVaga.status !== 'aberta') {
+        const { data: dadosProposta, error: errorProposta } = await supabase
+          .from('propostas')
+          .select('freelancer_address')
+          .eq('vagas_id', id)
+          .eq('status', 'aceita')
+          .maybeSingle();
+
+        if (dadosProposta) {
+          setFreelancerContratado(dadosProposta.freelancer_address.toLowerCase());
+        }
+      }
     } catch (err: any) {
       console.error(err);
       setErro('Não foi possível carregar os detalhes desta vaga.');
@@ -55,7 +73,6 @@ export default function DetalhesVaga() {
       return;
     }
 
-    // Bloqueio extra no frontend para segurança
     if (address.toLowerCase() === vaga?.contratante_address?.toLowerCase()) {
       alert('Você é o criador desta vaga! Não pode enviar propostas para si mesmo.');
       return;
@@ -90,6 +107,32 @@ export default function DetalhesVaga() {
     }
   };
 
+  // 🛠️ FUNÇÃO DO PASSO 2: FREELANCER ENTREGA O TRABALHO
+  const handleEntregarTrabalho = async () => {
+    if (!id || !address) return;
+
+    const confirmar = window.confirm("Tem certeza que deseja marcar este projeto como entregue? O contratante será notificado para liberar o pagamento.");
+    if (!confirmar) return;
+
+    setLoadingEntrega(true);
+    try {
+      const { error } = await supabase
+        .from('vagas')
+        .update({ status: 'revisao' })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      alert('Projeto marcado como entregue com sucesso! Aguarde a revisão do contratante.');
+      buscarDetalhesVaga(); // Recarrega os dados na tela
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao processar entrega do projeto.');
+    } finally {
+      setLoadingEntrega(false);
+    }
+  };
+
   if (!mounted) return null;
 
   if (loading) {
@@ -111,8 +154,8 @@ export default function DetalhesVaga() {
     );
   }
 
-  // Descobre dinamicamente se a carteira conectada pertence ao criador da vaga
   const IsDonoDaVaga = address && vaga && address.toLowerCase() === vaga.contratante_address?.toLowerCase();
+  const IsFreelancerContratado = address && freelancerContratado && address.toLowerCase() === freelancerContratado;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-50 flex flex-col">
@@ -136,11 +179,11 @@ export default function DetalhesVaga() {
         
         {/* COLUNA DA ESQUERDA: Detalhes da Vaga */}
         <div className="md:col-span-2 space-y-6 bg-zinc-900 border border-zinc-800 p-6 md:p-8 rounded-2xl">
-          <div>
-            <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-1 rounded-full uppercase font-medium">
-              Projeto Ativo
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h1 className="text-3xl font-black text-zinc-100">{vaga.titulo}</h1>
+            <span className="text-xs font-mono bg-zinc-950 border border-zinc-850 text-zinc-400 px-3 py-1 rounded-full uppercase tracking-wider">
+              {vaga.status}
             </span>
-            <h1 className="text-3xl font-black mt-3 text-zinc-100">{vaga.titulo}</h1>
           </div>
 
           <div className="border-t border-zinc-800 pt-4">
@@ -162,11 +205,11 @@ export default function DetalhesVaga() {
           </div>
         </div>
 
-        {/* COLUNA DA DIREITA: PAINEL DINÂMICO (DONO DA VAGA VS FREELANCER) */}
+        {/* COLUNA DA DIREITA: PAINEL DINÂMICO */}
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl h-fit space-y-5">
           
           {isConnected && IsDonoDaVaga ? (
-            /* CONTEXTO: CONTRATANTE LOGADO (DONO DA VAGA) */
+            /* CONTEXTO A: CONTRATANTE LOGADO (DONO DA VAGA) */
             <div className="space-y-4 py-1">
               <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-center">
                 <p className="text-xs text-blue-400 font-semibold">✨ Você é o criador deste projeto</p>
@@ -180,11 +223,61 @@ export default function DetalhesVaga() {
                 href={`/vagas/${id}/propostas`}
                 className="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/10"
               >
-                📬 Ver Propostas Recebidas
+                📬 Ver Propostas / Painel Escrow
               </Link>
             </div>
+          ) : ['em_andamento', 'revisao', 'disputa', 'concluido'].includes(vaga.status) ? (
+            /* CONTEXTO B: PROJETO JÁ FOI FECHADO (EM ANDAMENTO OU CONCLUÍDO) */
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold text-zinc-100">Status do Projeto</h2>
+              
+              {IsFreelancerContratado ? (
+                <div className="space-y-4">
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                    <p className="text-xs text-emerald-400 font-semibold">🚀 Você foi contratado para esta vaga!</p>
+                  </div>
+
+                  {vaga.status === 'em_andamento' && (
+                    <>
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        Trabalhe no projeto e, assim que terminar todas as entregas, clique no botão abaixo para avisar o contratante.
+                      </p>
+                      <button
+                        onClick={handleEntregarTrabalho}
+                        disabled={loadingEntrega}
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 text-white font-bold py-3 rounded-xl text-sm transition-colors shadow-lg shadow-emerald-600/10"
+                      >
+                        {loadingEntrega ? 'Enviando...' : '🏁 Marcar como Concluído'}
+                      </button>
+                    </>
+                  )}
+
+                  {vaga.status === 'revisao' && (
+                    <div className="p-4 bg-zinc-950 border border-zinc-850 rounded-xl text-center text-xs text-zinc-400">
+                      ⏳ Trabalho enviado! O contratante está revisando para liberar os seus USDC.
+                    </div>
+                  )}
+
+                  {vaga.status === 'disputa' && (
+                    <div className="p-4 bg-red-950/20 border border-red-900/30 rounded-xl text-center text-xs text-red-400">
+                      ⚠️ Uma disputa está aberta para este projeto. O Árbitro da plataforma irá avaliar.
+                    </div>
+                  )}
+
+                  {vaga.status === 'concluido' && (
+                    <div className="p-4 bg-emerald-950/20 border border-emerald-900/30 rounded-xl text-center text-xs text-emerald-400 font-bold">
+                      ✓ Projeto Finalizado. O pagamento foi enviado para a sua carteira!
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 bg-zinc-950 border border-zinc-850 rounded-xl text-center text-xs text-zinc-500">
+                  Esta vaga já foi preenchida e está em andamento com outro freelancer.
+                </div>
+              )}
+            </div>
           ) : (
-            /* CONTEXTO: FREELANCER NAVEGANDO */
+            /* CONTEXTO C: FREELANCER MANDANDO PROPOSTA (VAGA ABERTA) */
             <>
               <h2 className="text-lg font-bold text-zinc-100">Candidatar-se</h2>
               <p className="text-xs text-zinc-400">Envie a sua proposta técnica e financeira para o contratante analisar.</p>
