@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useAccount, useWriteContract, useReadContract } from 'wagmi';
+import { useAccount, useWriteContract, useReadContract, usePublicClient } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { parseUnits } from 'viem';
 import { supabase } from '@/lib/supabase';
@@ -37,12 +37,12 @@ const ERC20_ABI = [
     "type": "function"
   }, 
   {
-  "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
-  "name": "balanceOf",
-  "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
-  "stateMutability": "view",
-  "type": "function"
-}
+    "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
 ] as const;
 
 export default function GerenciarPropostas() {
@@ -53,6 +53,9 @@ export default function GerenciarPropostas() {
 
   // Hook do Wagmi para escrita de contratos inteligentes
   const { writeContractAsync } = useWriteContract();
+
+  // Hook para ler recibos e aguardar confirmações da rede blockchain
+  const publicClient = usePublicClient();
 
   // Estados
   const [vaga, setVaga] = useState<any>(null);
@@ -70,12 +73,12 @@ export default function GerenciarPropostas() {
   });
 
   // Lendo quanto de USDC o usuário logado possui na carteira
-const { data: saldoUSDC } = useReadContract({
-  address: USDC_SEPOLIA_ADDRESS,
-  abi: ERC20_ABI,
-  functionName: 'balanceOf',
-  args: address ? [address] : undefined,
-});
+  const { data: saldoUSDC } = useReadContract({
+    address: USDC_SEPOLIA_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -115,7 +118,7 @@ const { data: saldoUSDC } = useReadContract({
 
   // Função que executa a criação do Escrow na Blockchain e atualiza o Supabase
   const handleAceitarProposta = async (proposta: any) => {
-    if (!address || !vaga) return;
+    if (!address || !vaga || !publicClient) return;
     
     // Segurança visual: garante que só o dono da vaga pode aceitar
     if (address.toLowerCase() !== vaga.contratante_address.toLowerCase()) {
@@ -179,21 +182,38 @@ const { data: saldoUSDC } = useReadContract({
         ],
       });
 
-      console.log('Transação de criação enviada com sucesso! Hash:', txHash);
-      alert('Contrato Escrow criado na Blockchain com sucesso!');
-      
-      // 3. Atualizar estados no Supabase após a aprovação da carteira
-      await supabase
+      console.log('Transação de criação enviada! Hash:', txHash);
+      setTextoBotao('Minerando na Rede...');
+
+      // Aguarda a transação ser confirmada e buscar o recibo
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      console.log('Recibo completo minerado:', receipt);
+
+      // Captura o endereço do contrato filho gerado (geralmente emitido no log da fábrica)
+      const escrowAddressGerado = receipt.logs[0]?.address; 
+      console.log('Endereço do Escrow detectado:', escrowAddressGerado);
+
+      setTextoBotao('Salvando no Banco...');
+
+      // Atualiza estados no Supabase incluindo o endereço do Escrow
+      const { error: erroVagaSupabase } = await supabase
+        .from('vagas')
+        .update({ 
+          status: 'em_andamento',
+          escrow_address: escrowAddressGerado // ← Endereço salvo aqui!
+        })
+        .eq('id', id);
+
+      if (erroVagaSupabase) throw erroVagaSupabase;
+
+      const { error: erroPropostaSupabase } = await supabase
         .from('propostas')
         .update({ status: 'aceita' })
         .eq('id', proposta.id);
 
-      await supabase
-        .from('vagas')
-        .update({ status: 'em_andamento' })
-        .eq('id', id);
+      if (erroPropostaSupabase) throw erroPropostaSupabase;
 
-      alert('Contratação concluída e registrada com sucesso!');
+      alert(`Contratação concluída com Sucesso!\nEscrow criado em: ${escrowAddressGerado}`);
       
       // Recarrega as informações na tela e reseta leituras
       carregarDadosVagaEPropostas();
