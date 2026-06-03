@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useAccount, useWriteContract } from 'wagmi';
+import { useAccount, useWriteContract, useReadContract } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { parseUnits } from 'viem';
 import { supabase } from '@/lib/supabase';
@@ -13,6 +13,37 @@ const USDC_SEPOLIA_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
 
 // Endereço provisório para o Árbitro da plataforma (vamos usar apenas para teste)
 const ARBITRO_PADRAO = '0x9965507B1a0595C5411CC43f3d389616595F3333';
+
+// ABI minimalista do padrão ERC20 necessária para checar e aprovar saldo de USDC
+const ERC20_ABI = [
+  {
+    "inputs": [
+      { "internalType": "address", "name": "owner", "type": "address" },
+      { "internalType": "address", "name": "spender", "type": "address" }
+    ],
+    "name": "allowance",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "spender", "type": "address" },
+      { "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ],
+    "name": "approve",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }, 
+  {
+  "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+  "name": "balanceOf",
+  "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+  "stateMutability": "view",
+  "type": "function"
+}
+] as const;
 
 export default function GerenciarPropostas() {
   const { id } = useParams();
@@ -28,6 +59,23 @@ export default function GerenciarPropostas() {
   const [propostas, setPropostas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [contratandoId, setContratandoId] = useState<number | null>(null);
+  const [textoBotao, setTextoBotao] = useState<string>('');
+
+  // Lendo quanto de USDC o usuário logado já aprovou para a nossa Fábrica
+  const { data: allowance, refetch: atualizarAllowance } = useReadContract({
+    address: USDC_SEPOLIA_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: address ? [address, ESCROW_FACTORY_ADDRESS] : undefined,
+  });
+
+  // Lendo quanto de USDC o usuário logado possui na carteira
+const { data: saldoUSDC } = useReadContract({
+  address: USDC_SEPOLIA_ADDRESS,
+  abi: ERC20_ABI,
+  functionName: 'balanceOf',
+  args: address ? [address] : undefined,
+});
 
   useEffect(() => {
     setMounted(true);
@@ -78,25 +126,61 @@ export default function GerenciarPropostas() {
     try {
       setContratandoId(proposta.id);
       
-      // 1. Converter o valor proposto para a formatação do USDC (6 Casas Decimais)
-      // Exemplo: "150" vira 150000000 BigInt
+      // Converter o valor proposto para a formatação do USDC (6 Casas Decimais)
       const valorEmWeiUSDC = parseUnits(proposta.valor_proposto.toString(), 6);
 
-      // 2. Chamar o Contrato de Fábrica (EscrowFactory) via MetaMask
+      const saldoAtual = saldoUSDC ? BigInt(saldoUSDC.toString()) : BigInt(0);
+      if (saldoAtual < valorEmWeiUSDC) {
+        alert(
+          `Saldo insuficiente em USDC!\n\n` +
+          `Esta proposta exige: ${proposta.valor_proposto} USDC\n` +
+          `Seu saldo atual é de: ${Number(saldoAtual) / 1e6} USDC.\n\n` +
+          `Por favor, obtenha mais tokens de teste na Faucet antes de prosseguir.`
+        );
+        return; // Aborta a operação imediatamente e impede o erro estranho de gás!
+      }
+
+      // --- PASSO A: VERIFICAR E EXECUTAR APPROVE SE NECESSÁRIO ---
+      const limiteAprovadoAtual = allowance ? BigInt(allowance.toString()) : BigInt(0);
+
+      if (limiteAprovadoAtual < valorEmWeiUSDC) {
+        setTextoBotao('Aprovando USDC...');
+        alert('Primeiro, você precisa autorizar a fábrica a movimentar o USDC. Assine o Approve na MetaMask!');
+        
+        const txApprove = await writeContractAsync({
+          address: USDC_SEPOLIA_ADDRESS,
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [ESCROW_FACTORY_ADDRESS, valorEmWeiUSDC],
+        });
+
+        console.log('Approve enviado! Hash:', txApprove);
+        alert('Aprovação enviada! Aguarde alguns segundos e confirme a criação do Escrow.');
+        
+        // Atualiza a leitura do allowance vinda da blockchain
+        await atualizarAllowance();
+      }
+
+      // --- PASSO B: CRIAR O CONTRATO ESCROW DE FATO ---
+      setTextoBotao('Criando Escrow...');
+
+      // Endereço público genérico de teste para o Árbitro
+      const arbitroTeste = "0x000000000000000000000000000000000000dEaD";
+
       const txHash = await writeContractAsync({
         address: ESCROW_FACTORY_ADDRESS,
         abi: ESCROW_FACTORY_ABI,
         functionName: 'criaEscrow',
         args: [
-          proposta.freelancer_address as `0x${string}`, // _prestador
-          ARBITRO_PADRAO as `0x${string}`,               // _arbitro
-          USDC_SEPOLIA_ADDRESS as `0x${string}`,         // _tokenPagamento
-          valorEmWeiUSDC                                 // _valor (uint256)
+          proposta.freelancer_address as `0x${string}`,   // _prestador
+          arbitroTeste as `0x${string}`,                  // _arbitro
+          USDC_SEPOLIA_ADDRESS as `0x${string}`,          // _tokenPagamento
+          valorEmWeiUSDC                                  // _valor (uint256)
         ],
       });
 
-      console.log('Transação enviada com sucesso! Hash:', txHash);
-      alert('Contrato Escrow criado na Blockchain! Aguardando mineração...');
+      console.log('Transação de criação enviada com sucesso! Hash:', txHash);
+      alert('Contrato Escrow criado na Blockchain com sucesso!');
       
       // 3. Atualizar estados no Supabase após a aprovação da carteira
       await supabase
@@ -111,14 +195,16 @@ export default function GerenciarPropostas() {
 
       alert('Contratação concluída e registrada com sucesso!');
       
-      // Recarrega as informações na tela
+      // Recarrega as informações na tela e reseta leituras
       carregarDadosVagaEPropostas();
+      atualizarAllowance();
 
     } catch (error: any) {
       console.error('Erro na transação Web3:', error);
       alert(`Erro ao processar contratação: ${error.shortMessage || error.message || 'Verifique o console'}`);
     } finally {
       setContratandoId(null);
+      setTextoBotao('');
     }
   };
 
@@ -204,9 +290,9 @@ export default function GerenciarPropostas() {
                       <button
                         onClick={() => handleAceitarProposta(proposta)}
                         disabled={contratandoId !== null || proposta.status !== 'pendente'}
-                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 text-white disabled:text-zinc-500 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors min-w-[120px]"
+                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 text-white disabled:text-zinc-500 text-xs font-bold px-4 py-2.5 rounded-lg transition-colors min-w-[140px]"
                       >
-                        {contratandoId === proposta.id ? 'Processando...' : proposta.status === 'pendente' ? 'Aceitar Proposta' : 'Encerrada'}
+                        {contratandoId === proposta.id ? (textoBotao || 'Processando...') : proposta.status === 'pendente' ? 'Aceitar Proposta' : 'Encerrada'}
                       </button>
                     </div>
 
