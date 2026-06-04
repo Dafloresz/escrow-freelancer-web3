@@ -220,6 +220,7 @@ export default function GerenciarPropostas() {
         address: vaga.escrow_address as `0x${string}`,
         abi: ESCROW_FILHO_ABI,
         functionName: 'pagarPrestador',
+        gas: BigInt(150000),
       });
 
       setStatusTextoAcao('Confirmando na Rede...');
@@ -247,6 +248,7 @@ export default function GerenciarPropostas() {
         address: vaga.escrow_address as `0x${string}`,
         abi: ESCROW_FILHO_ABI,
         functionName: 'iniciarDisputa',
+        gas: BigInt(150000),
       });
 
       await publicClient.waitForTransactionReceipt({ hash: tx });
