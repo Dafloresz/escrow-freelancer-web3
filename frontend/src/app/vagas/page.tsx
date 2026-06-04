@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount } from 'wagmi'; // Importado para ler a carteira conectada
+import { useAccount } from 'wagmi'; 
 import { supabase } from '@/lib/supabase';
 
 export default function Home() {
@@ -94,6 +94,7 @@ export default function Home() {
               // Verifica se a carteira conectada é a dona desta vaga específica
               const donoDaVaga = vaga.contratante_address || vaga.contratante_addres;
               const isDono = isConnected && address && donoDaVaga && address.toLowerCase() === donoDaVaga.toLowerCase();
+              const isVagaAberta = !vaga.status || vaga.status === 'aberta';
 
               return (
                 <div 
@@ -103,7 +104,11 @@ export default function Home() {
                   <div className="space-y-2 max-w-2xl">
                     <div className="flex items-center gap-3">
                       <h3 className="text-xl font-bold text-zinc-100">{vaga.titulo}</h3>
-                      <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 uppercase font-medium">
+                      <span className={`text-xs px-2 py-0.5 rounded border uppercase font-medium ${
+                        isVagaAberta 
+                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' 
+                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      }`}>
                         {vaga.status || 'aberta'}
                       </span>
                     </div>
@@ -124,27 +129,40 @@ export default function Home() {
                   <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center gap-4 border-t md:border-t-0 border-zinc-800 pt-4 md:pt-0">
                     <div className="text-left md:text-right">
                       <span className="text-xs text-zinc-500 block">Orçamento</span>
-                      <span className="text-2xl font-black text-blue-400 font-mono">
+                      <span className="text-2xl font-black text-emerald-400 font-mono">
                         {vaga.valor} <span className="text-sm font-normal text-zinc-400">USDC</span>
                       </span>
                     </div>
                     
                     <div className="flex items-center gap-2 w-full md:w-auto">
-                      {/* EXCLUSIVO: Aparece o botão azul "Ver Propostas" se for o dono da vaga */}
-                      {isDono && (
-                        <Link href={`/vagas/${vaga.id}/propostas`} className="w-full md:w-auto">
-                          <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shadow-lg shadow-blue-600/10 whitespace-nowrap w-full">
-                            📬 Ver Propostas
+                      {isVagaAberta ? (
+                        <>
+                          {/* VAGA ABERTA: Fluxo normal de propostas e candidatura */}
+                          {isDono ? (
+                            <Link href={`/vagas/${vaga.id}/propostas`} className="w-full md:w-auto">
+                              <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shadow-lg shadow-blue-600/10 whitespace-nowrap w-full">
+                                📬 Ver Propostas
+                              </button>
+                            </Link>
+                          ) : (
+                            <Link href={`/vagas/${vaga.id}`} className="w-full md:w-auto">
+                              <button className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full">
+                                Candidatar-se
+                              </button>
+                            </Link>
+                          )}
+                        </>
+                      ) : (
+                        /* 🌟 PROJETO FECHADO (EM ANDAMENTO, REVISÃO, ETC): Botão Inteligente Exclusivo */
+                        <Link 
+                          href={isDono ? `/vagas/${vaga.id}/propostas` : `/vagas/${vaga.id}`} 
+                          className="w-full md:w-auto"
+                        >
+                          <button className="bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-300 hover:text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors whitespace-nowrap w-full flex items-center justify-center gap-1">
+                            💼 Gerenciar Projeto
                           </button>
                         </Link>
                       )}
-
-                      {/* Botão Padrão de Detalhes / Candidatura */}
-                      <Link href={`/vagas/${vaga.id}`} className="w-full md:w-auto">
-                        <button className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full">
-                          Candidatar-se
-                        </button>
-                      </Link>
                     </div>
 
                   </div>

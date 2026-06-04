@@ -46,14 +46,14 @@ const ERC20_ABI = [
 const ESCROW_FILHO_ABI = [
   {
     "inputs": [],
-    "name": "liberarPagamento", // Ajuste o nome conforme está no seu contrato Solidity (ex: release, liberar)
+    "name": "pagarPrestador", 
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
   {
     "inputs": [],
-    "name": "abrirDisputa", // Ajuste o nome conforme está no seu contrato Solidity (ex: contestar, abrirDisputa)
+    "name": "iniciarDisputa", 
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -207,7 +207,7 @@ export default function GerenciarPropostas() {
       const tx = await writeContractAsync({
         address: vaga.escrow_address as `0x${string}`,
         abi: ESCROW_FILHO_ABI,
-        functionName: 'liberarPagamento', // Nome da função de liberação no seu arquivo .sol
+        functionName: 'pagarPrestador', // Nome da função de liberação no seu arquivo .sol
       });
 
       setTextoBotao('Confirmando na Rede...');
@@ -236,7 +236,7 @@ export default function GerenciarPropostas() {
       const tx = await writeContractAsync({
         address: vaga.escrow_address as `0x${string}`,
         abi: ESCROW_FILHO_ABI,
-        functionName: 'abrirDisputa', // Nome da função de disputa no seu arquivo .sol
+        functionName: 'iniciarDisputa', // Nome da função de disputa no seu arquivo .sol
       });
 
       await publicClient.waitForTransactionReceipt({ hash: tx });
