@@ -4,14 +4,12 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAccount, useWriteContract, useReadContract, usePublicClient } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { parseUnits } from 'viem';
+import { parseUnits, decodeEventLog } from 'viem'; // Adicionado decodeEventLog
 import { supabase } from '@/lib/supabase';
 import { ESCROW_FACTORY_ADDRESS, ESCROW_FACTORY_ABI } from '@/contracts';
 
-// Endereço oficial do contrato USDC na rede Sepolia Testnet
 const USDC_SEPOLIA_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
 
-// ABI minimalista do padrão ERC20 necessária para checar e aprovar saldo de USDC
 const ERC20_ABI = [
   {
     "inputs": [
@@ -42,7 +40,6 @@ const ERC20_ABI = [
   }
 ] as const;
 
-// 📜 ABI do Contrato Escrow Filho (Criado pela Fábrica) para Liberação e Disputas
 const ESCROW_FILHO_ABI = [
   {
     "inputs": [],
@@ -66,21 +63,17 @@ export default function GerenciarPropostas() {
   const { address, isConnected } = useAccount();
   const [mounted, setMounted] = useState(false);
 
-  // Hook do Wagmi para escrita de contratos inteligentes
   const { writeContractAsync } = useWriteContract();
-
-  // Hook para ler recibos e aguardar confirmações da rede blockchain
   const publicClient = usePublicClient();
 
-  // Estados
   const [vaga, setVaga] = useState<any>(null);
   const [propostas, setPropostas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
   const [contratandoId, setContratandoId] = useState<number | null>(null);
-  const [textoBotao, setTextoBotao] = useState<string>('');
+  const [statusTextoAcao, setStatusTextoAcao] = useState<string>('');
   const [executandoAcaoEscrow, setExecutandoAcaoEscrow] = useState(false);
 
-  // Lendo quanto de USDC o usuário logado já aprovou para a nossa Fábrica
   const { data: allowance, refetch: atualizarAllowance } = useReadContract({
     address: USDC_SEPOLIA_ADDRESS,
     abi: ERC20_ABI,
@@ -88,7 +81,6 @@ export default function GerenciarPropostas() {
     args: address ? [address, ESCROW_FACTORY_ADDRESS] : undefined,
   });
 
-  // Lendo quanto de USDC o usuário logado possui na carteira
   const { data: saldoUSDC } = useReadContract({
     address: USDC_SEPOLIA_ADDRESS,
     abi: ERC20_ABI,
@@ -104,7 +96,6 @@ export default function GerenciarPropostas() {
   const carregarDadosVagaEPropostas = async () => {
     try {
       setLoading(true);
-
       const { data: dadosVaga, error: erroVaga } = await supabase
         .from('vagas')
         .select('*')
@@ -122,7 +113,6 @@ export default function GerenciarPropostas() {
 
       if (erroPropostas) throw erroPropostas;
       setPropostas(dadosPropostas || []);
-
     } catch (err) {
       console.error('Erro ao carregar dados:', err);
     } finally {
@@ -130,7 +120,6 @@ export default function GerenciarPropostas() {
     }
   };
 
-  // Função que executa a criação do Escrow na Blockchain (Passo 1)
   const handleAceitarProposta = async (proposta: any) => {
     if (!address || !vaga || !publicClient) return;
     
@@ -142,8 +131,8 @@ export default function GerenciarPropostas() {
     try {
       setContratandoId(proposta.id);
       const valorEmWeiUSDC = parseUnits(proposta.valor_proposto.toString(), 6);
-
       const saldoAtual = saldoUSDC ? BigInt(saldoUSDC.toString()) : BigInt(0);
+      
       if (saldoAtual < valorEmWeiUSDC) {
         alert(`Saldo insuficiente em USDC!`);
         return;
@@ -152,7 +141,7 @@ export default function GerenciarPropostas() {
       const limiteAprovadoAtual = allowance ? BigInt(allowance.toString()) : BigInt(0);
 
       if (limiteAprovadoAtual < valorEmWeiUSDC) {
-        setTextoBotao('Aprovando USDC...');
+        setStatusTextoAcao('Aprovando USDC...');
         const txApprove = await writeContractAsync({
           address: USDC_SEPOLIA_ADDRESS,
           abi: ERC20_ABI,
@@ -163,7 +152,8 @@ export default function GerenciarPropostas() {
         await atualizarAllowance();
       }
 
-      setTextoBotao('Criando Escrow...');
+      setStatusTextoAcao('Criando Escrow...');
+      // Substitua pelo endereço real do seu árbitro se houver
       const arbitroTeste = "0x000000000000000000000000000000000000dEaD";
 
       const txHash = await writeContractAsync({
@@ -178,65 +168,85 @@ export default function GerenciarPropostas() {
         ],
       });
 
-      setTextoBotao('Minerando na Rede...');
+      setStatusTextoAcao('Minerando na Rede...');
       const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      const escrowAddressGerado = receipt.logs[0]?.address; 
+      
+      // 🚨 CORREÇÃO CRÍTICA: Lendo o evento correto para pegar o endereço do Escrow gerado
+      let escrowAddressGerado = '';
+      for (const log of receipt.logs) {
+        try {
+          const decoded = decodeEventLog({
+            abi: ESCROW_FACTORY_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+        
+          if (decoded.eventName === 'EscrowCriado') {
+            escrowAddressGerado = (decoded.args as any).escrow;
+            break;
+          }
+        } catch (e) {
+          // Ignora logs que não são do Factory (ex: logs do ERC20)
+          continue; 
+        }
+      }
 
-      setTextoBotao('Salvando no Banco...');
+      if (!escrowAddressGerado) {
+        throw new Error("Não foi possível encontrar o endereço do Escrow nos logs da transação.");
+      }
+
+      setStatusTextoAcao('Salvando no Banco...');
       await supabase.from('vagas').update({ status: 'em_andamento', escrow_address: escrowAddressGerado }).eq('id', id);
       await supabase.from('propostas').update({ status: 'aceita' }).eq('id', proposta.id);
 
       alert(`Contratação concluída com Sucesso!`);
       carregarDadosVagaEPropostas();
-
     } catch (error: any) {
       console.error('Erro na contratação:', error);
+      alert(error.shortMessage || error.message || 'Erro ao processar a contratação.');
     } finally {
       setContratandoId(null);
-      setTextoBotao('');
+      setStatusTextoAcao('');
     }
   };
 
-  // 🛠️ PASSO 3: LIBERAR PAGAMENTO NO CONTRATO FILHO DO ESCROW
   const handleLiberarPagamento = async () => {
     if (!vaga?.escrow_address || !publicClient) return;
     try {
       setExecutandoAcaoEscrow(true);
-      setTextoBotao('Liberando Fundos...');
+      setStatusTextoAcao('Liberando Fundos...');
 
       const tx = await writeContractAsync({
         address: vaga.escrow_address as `0x${string}`,
         abi: ESCROW_FILHO_ABI,
-        functionName: 'pagarPrestador', // Nome da função de liberação no seu arquivo .sol
+        functionName: 'pagarPrestador',
       });
 
-      setTextoBotao('Confirmando na Rede...');
+      setStatusTextoAcao('Confirmando na Rede...');
       await publicClient.waitForTransactionReceipt({ hash: tx });
 
-      // Atualiza banco para concluído
       await supabase.from('vagas').update({ status: 'concluido' }).eq('id', id);
       alert('Pagamento liberado com sucesso para o Freelancer!');
       carregarDadosVagaEPropostas();
     } catch (error: any) {
-      console.error(error);
-      alert('Erro ao liberar pagamento. Verifique se a função do contrato bate com "liberarPagamento"');
+      console.error("Erro completo capturado na liberação:", error);
+      alert(error.shortMessage || 'Erro ao liberar pagamento. Verifique se a sua carteira MetaMask é a dona do contrato.');
     } finally {
       setExecutandoAcaoEscrow(false);
-      setTextoBotao('');
+      setStatusTextoAcao('');
     }
   };
 
-  // 🛠️ PASSO 4: ABRIR DISPUTA NO CONTRATO FILHO DO ESCROW
   const handleAbrirDisputa = async () => {
     if (!vaga?.escrow_address || !publicClient) return;
     try {
       setExecutandoAcaoEscrow(true);
-      setTextoBotao('Abrindo Disputa...');
+      setStatusTextoAcao('Abrindo Disputa...');
 
       const tx = await writeContractAsync({
         address: vaga.escrow_address as `0x${string}`,
         abi: ESCROW_FILHO_ABI,
-        functionName: 'iniciarDisputa', // Nome da função de disputa no seu arquivo .sol
+        functionName: 'iniciarDisputa',
       });
 
       await publicClient.waitForTransactionReceipt({ hash: tx });
@@ -246,10 +256,10 @@ export default function GerenciarPropostas() {
       carregarDadosVagaEPropostas();
     } catch (error: any) {
       console.error(error);
-      alert('Erro ao abrir disputa.');
+      alert(error.shortMessage || 'Erro ao abrir disputa.');
     } finally {
       setExecutandoAcaoEscrow(false);
-      setTextoBotao('');
+      setStatusTextoAcao('');
     }
   };
 
@@ -297,7 +307,6 @@ export default function GerenciarPropostas() {
         ) : (
           <div className="space-y-4">
             
-            {/* ⚡ INTERFACE SE A VAGA JÁ ESTIVER EM ANDAMENTO OU REVISÃO (PASSOS 3 E 4) */}
             {['em_andamento', 'revisao', 'disputa'].includes(vaga?.status) ? (
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl space-y-4">
                 <h3 className="text-md font-bold text-zinc-200">Contrato de Escrow Ativo</h3>
@@ -317,7 +326,7 @@ export default function GerenciarPropostas() {
                     disabled={executandoAcaoEscrow || vaga.status === 'concluido'}
                     className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 text-white font-bold py-3 px-4 rounded-xl text-sm transition-colors"
                   >
-                    {executandoAcaoEscrow ? textoBotao : 'Liberar Pagamento (USDC)'}
+                    {executandoAcaoEscrow ? statusTextoAcao : 'Liberar Pagamento (USDC)'}
                   </button>
                   
                   {vaga.status !== 'disputa' && (
@@ -326,7 +335,7 @@ export default function GerenciarPropostas() {
                       disabled={executandoAcaoEscrow}
                       className="bg-zinc-800 hover:bg-red-950/40 hover:text-red-400 border border-zinc-700 text-zinc-300 font-bold py-3 px-6 rounded-xl text-sm transition-all"
                     >
-                      {executandoAcaoEscrow ? 'Processando...' : 'Abrir Disputa'}
+                      {executandoAcaoEscrow && statusTextoAcao.includes('Disputa') ? 'Processando...' : 'Abrir Disputa'}
                     </button>
                   )}
                 </div>
@@ -336,7 +345,6 @@ export default function GerenciarPropostas() {
                 ✓ Este projeto foi finalizado e os fundos foram liberados com sucesso!
               </div>
             ) : (
-              /* FLUXO PADRÃO: LISTAGEM DE PROPOSTAS COMPATÍVEL COM PASSO 1 */
               <>
                 <h2 className="text-lg font-bold text-zinc-200">Propostas Recebidas ({propostas.length})</h2>
                 {propostas.length === 0 ? (
@@ -362,7 +370,7 @@ export default function GerenciarPropostas() {
                             disabled={contratandoId !== null || proposta.status !== 'pendente'}
                             className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 text-white text-xs font-bold px-4 py-2.5 rounded-lg min-w-[140px]"
                           >
-                            {contratandoId === proposta.id ? (textoBotao || 'Processando...') : 'Aceitar Proposta'}
+                            {contratandoId === proposta.id ? (statusTextoAcao || 'Processando...') : 'Aceitar Proposta'}
                           </button>
                         </div>
                       </div>
