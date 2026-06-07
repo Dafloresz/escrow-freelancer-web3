@@ -230,6 +230,24 @@ export default function DetalhesVaga() {
             /* CONTEXTO B: PROJETO JÁ FOI FECHADO (EM ANDAMENTO OU CONCLUÍDO) */
             <div className="space-y-4">
               <h2 className="text-lg font-bold text-zinc-100">Status do Projeto</h2>
+
+              {/* 🔗 NOVO COMPONENTE: LINK DO ETHERSCAN */}
+              {vaga.escrow_address && (
+                <div className="p-4 bg-zinc-950 border border-zinc-850 rounded-xl flex flex-col gap-2">
+                  <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Transparência On-Chain</p>
+                  <a
+                    href={`https://sepolia.etherscan.io/address/${vaga.escrow_address}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors w-fit"
+                  >
+                    Ver Contrato no Sepolia Etherscan
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                    </svg>
+                  </a>
+                </div>
+              )}
               
               {IsFreelancerContratado ? (
                 <div className="space-y-4">

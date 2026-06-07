@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAccount, useWriteContract, useReadContract, usePublicClient } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { parseUnits, decodeEventLog } from 'viem'; // Adicionado decodeEventLog
+import { parseUnits, decodeEventLog } from 'viem'; 
 import { supabase } from '@/lib/supabase';
 import { ESCROW_FACTORY_ADDRESS, ESCROW_FACTORY_ABI } from '@/contracts';
 
@@ -153,7 +153,6 @@ export default function GerenciarPropostas() {
       }
 
       setStatusTextoAcao('Criando Escrow...');
-      // Substitua pelo endereço real do seu árbitro se houver
       const arbitroTeste = "0x000000000000000000000000000000000000dEaD";
 
       const txHash = await writeContractAsync({
@@ -171,7 +170,7 @@ export default function GerenciarPropostas() {
       setStatusTextoAcao('Minerando na Rede...');
       const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
       
-      // 🚨 CORREÇÃO CRÍTICA: Lendo o evento correto para pegar o endereço do Escrow gerado
+      // 🚀 CORREÇÃO APLICADA AQUI: Filtro e captura segura do endereço do Escrow
       let escrowAddressGerado = '';
       for (const log of receipt.logs) {
         try {
@@ -181,12 +180,16 @@ export default function GerenciarPropostas() {
             topics: log.topics,
           });
         
-          if (decoded.eventName === 'EscrowCriado') {
-            escrowAddressGerado = (decoded.args as any).escrow;
-            break;
+          if (decoded.eventName === 'EscrowCriado' && decoded.args) {
+            const args = decoded.args as any;
+            
+            if (args.escrow && args.escrow !== '0x0000000000000000000000000000000000000000') {
+              escrowAddressGerado = args.escrow;
+              console.log("🚀 Novo contrato Escrow detectado com sucesso:", escrowAddressGerado);
+              break; 
+            }
           }
         } catch (e) {
-          // Ignora logs que não são do Factory (ex: logs do ERC20)
           continue; 
         }
       }
@@ -315,6 +318,24 @@ export default function GerenciarPropostas() {
                 <p className="text-xs text-zinc-400 font-mono bg-zinc-950 p-3 rounded border border-zinc-850 break-all">
                   Endereço do Escrow: {vaga.escrow_address}
                 </p>
+
+                {/* 🔗 NOVO COMPONENTE: LINK DO ETHERSCAN */}
+                {vaga.escrow_address && (
+                  <div className="p-4 bg-zinc-950 border border-zinc-850 rounded-xl flex flex-col gap-2">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Transparência On-Chain</p>
+                    <a
+                      href={`https://sepolia.etherscan.io/address/${vaga.escrow_address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors w-fit"
+                    >
+                      Ver Contrato no Sepolia Etherscan
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </a>
+                  </div>
+                )}
                 
                 {vaga.status === 'revisao' && (
                   <div className="bg-emerald-950/20 border border-emerald-900/40 p-4 rounded-xl text-sm text-emerald-400">
@@ -343,8 +364,28 @@ export default function GerenciarPropostas() {
                 </div>
               </div>
             ) : vaga?.status === 'concluido' ? (
-              <div className="text-center p-12 bg-emerald-950/10 border border-emerald-900/20 rounded-2xl text-emerald-400 font-bold">
-                ✓ Este projeto foi finalizado e os fundos foram liberados com sucesso!
+                <div className="space-y-4">
+                <div className="text-center p-12 bg-emerald-950/10 border border-emerald-900/20 rounded-2xl text-emerald-400 font-bold">
+                  ✓ Este projeto foi finalizado e os fundos foram liberados com sucesso!
+                </div>
+                
+                {/* 🔗 COMPONENTE: LINK DO ETHERSCAN (AGORA TAMBÉM NO STATUS CONCLUÍDO) */}
+                {vaga.escrow_address && (
+                  <div className="p-4 bg-zinc-950 border border-zinc-850 rounded-xl flex flex-col gap-2">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Transparência On-Chain</p>
+                    <a
+                      href={`https://sepolia.etherscan.io/address/${vaga.escrow_address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors w-fit"
+                    >
+                      Ver Contrato no Sepolia Etherscan
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </a>
+                  </div>
+                )}
               </div>
             ) : (
               <>
