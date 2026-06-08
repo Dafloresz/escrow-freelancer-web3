@@ -1,4 +1,4 @@
-# 💼 Web3 Freelance Marketplace: Escrow Architecture
+ # 💼 Web3 Freelance Marketplace: Escrow Architecture
 Um protocolo descentralizado de prestação de serviços que utiliza smart contracts na EVM para garantir a execução financeira ponta a ponta, construído com uma arquitetura híbrida (Web2.5) e sem intermediários centralizado.
 
 ## ⚠️ O Problema que o Projeto Resolve
@@ -39,13 +39,109 @@ Implementa uma **Máquina de Estados (State Machine)** rigorosa para o ciclo de 
 * **Segurança de Modificadores:** Utilização de modificadores de acesso granulares (`somenteContratante`, `somentePrestador`, `somenteArbitro`) para blindar execuções de estado.
 * **Mitigação de Reentrância (Reentrancy Guard):** O estado interno é sempre atualizado (`estado = Estado.FINALIZADO`) **antes** da execução de chamadas externas ou transferências de tokens, seguindo o padrão Checks-Effects-Interactions.
 
-## ⚙️ Integração Frontend (Web3 x Web2)
+ que prenderia fundos para sempre |
+| `_arbitro != address(0)` | Idem para o árbitro |
+| `_tokenPagamento != address(0)` | Idem para o token ERC-20 |
+| `_prestador != msg.sender` | Impede auto-contratação (anti-lavagem de dinheiro) |
+| `arbitro != contratante && arbitro != prestador` | Garante que o árbitro é um terceiro genuinamente neutro |
+| `_valor > 0` | Impede criação de contratos sem valor econômico |
+ 
+#### Funções de Consulta
+ 
+```solidity
+// Retorna todos os escrows criados na plataforma
+function exibirTodosEscrow() public view returns (address[] memory)
+ 
+// Retorna os escrows de um usuário específico (contratante ou prestador)
+function exibirEscrowUsuarioEspecifico(address _usuario) public view returns (address[] memory)
+```
+ 
+---
+ 
+### 2. `Escrow.sol` (Contrato Filho)
+Implementa uma **Máquina de Estados (State Machine)** rigorosa para o ciclo de vida do projeto.
+ 
+#### Ciclo de Vida: Máquina de Estados
+ 
+```
+CRIADO → ACEITO → DEPOSITADO → ENTREGUE → FINALIZADO
+                      ↓              ↓
+                  EM_DISPUTA ────────┘
+```
+ 
+| Estado | Quem transita | Como sair |
+|---|---|---|
+| `CRIADO` | — | Prestador chama `aceitarContrato()` |
+| `ACEITO` | Prestador | Contratante chama `depositar()` |
+| `DEPOSITADO` | Contratante | Prestador chama `entregarServico()` |
+| `ENTREGUE` | Prestador | Contratante chama `pagarPrestador()` |
+| `EM_DISPUTA` | Qualquer parte | Árbitro chama `resolverDisputa()` |
+| `FINALIZADO` | — | Estado terminal, sem retorno |
+ 
+#### Mecanismos de Proteção Automática
+ 
+Além do fluxo principal, o contrato possui dois mecanismos de proteção contra abandono:
+ 
+**Proteção ao Prestador — `pagarPorPrazoExpirado()`**
+Se o contratante sumir após a entrega, o prestador pode sacar os fundos automaticamente decorridos **3 dias** sem aprovação.
+ 
+```solidity
+require(estado == Estado.ENTREGUE, "Projeto ainda nao foi entregue");
+require(block.timestamp >= dataEntrega + 3 days, "Prazo de 3 dias nao expirou");
+```
+ 
+**Proteção ao Contratante — `reembolsar()`**
+Se o prestador aceitar o contrato mas nunca entregar o serviço, o contratante pode resgatar os fundos após **30 dias** do depósito.
+ 
+```solidity
+require(estado == Estado.DEPOSITADO, "Nao tem deposito para reembolsar!");
+require(block.timestamp >= dataDeposito + 30 days, "Aguarde 30 dias para poder reembolsar!");
+```
+ 
+#### Segurança de Modificadores de Acesso
+ 
+Cada função sensível é protegida por modificadores granulares que blindam execuções de estado:
+ 
+```solidity
+modifier somentePrestador { require(msg.sender == prestador, ...); _; }
+modifier somenteContratante { require(msg.sender == contratante, ...); _; }
+modifier somenteArbitro { require(msg.sender == arbitro, ...); _; }
+```
+ 
+#### Mitigação de Reentrância (Checks-Effects-Interactions)
+ 
+O estado interno é **sempre** atualizado para `FINALIZADO` **antes** de qualquer transferência de token, seguindo o padrão CEI e eliminando a superfície de ataque de reentrância:
+ 
+```solidity
+// ✅ Estado atualizado ANTES da transferência
+estado = Estado.FINALIZADO;
+bool sucesso = IERC20(tokenPagamento).transfer(prestador, valor);
+require(sucesso, "A transferencia falhou!");
+```
+ 
+#### Resolução de Disputas
+ 
+O árbitro resolve disputas com uma decisão binária e imutável:
+ 
+```solidity
+// true  → fundos vão para o prestador
+// false → fundos são devolvidos ao contratante
+function resolverDisputa(bool decisaoDoPrestador) public somenteArbitro
+```
+ 
+---
 
-O Frontend (Next.js) atua como o orquestrador entre o banco de dados relacional e a blockchain, lidando com os desafios assíncronos da EVM:
-
-* **Decodificação de Logs Nativos:** Para vincular o banco de dados (Web2) ao contrato filho (Web3), o frontend escuta o recibo da transação do Factory e utiliza a biblioteca `viem` (`decodeEventLog`) para fazer o parse seguro dos logs binários e extrair o endereço único gerado pelo evento `EscrowCriado`.
-* **Bypass de RPC Gas Estimation:** Implementação de injeção de limites manuais de gás (`gas limit overrides`) nas chamadas de escrita (`pagarPrestador`, `iniciarDisputa`) para contornar a volatilidade e falhas intrínsecas de estimativa automática de nós RPC em testnets.
-* **Gerenciamento de Estado de Transação:** Isolamento de instâncias e variáveis de estado local durante o fluxo de assinaturas (Approve -> Tx Execute -> Wait for Receipt) para evitar colisões no cache do Wagmi (`useWriteContract`).
+#### Fluxo de Integração: Criação de Escrow
+ 
+```
+1. Frontend chama IERC20.approve(escrowAddress, valor)
+2. Frontend chama EscrowFactory.criaEscrow(prestador, arbitro, token, valor)
+3. Frontend escuta o recibo da transação
+4. viem.decodeEventLog() extrai o endereço do contrato filho do evento EscrowCriado
+5. Endereço é persistido no Supabase vinculado à vaga
+```
+ 
+---
 
 ## 🔮 Próximos Passos & Evolução do Protocolo (Roadmap)
 
