@@ -184,6 +184,32 @@ Para rodar este dApp na sua máquina, você precisará configurar o Frontend, o 
 👉 **[Clique aqui para acessar o Guia de Instalação](SETUP.md)**
 
 ---
+## Endereço do contrato
+
+0x1Feda785F331746eE104916050E06022fFD93Ff2
+
+Etherscan: https://sepolia.etherscan.io/address/0x1Feda785F331746eE104916050E06022fFD93Ff2
+
+Observação: Embora tenha dois contratos no github, como estou usando Factory Pattern, meu contrato é apenas um contrato fábrica que cria outros contratos, por isso o envio de apenas um endereço.
+
+No vídeo de demonstração é mostrado o endereço dos contratos criados e a utilização da Blockchain.
+
+## 📷 Demonstração do Projeto na rede Sepolia
+Youtube: https://youtu.be/Yh4aUE6hyvQ
+
+Observação: Fiz um vídeo de demonstração, mostrando o funcionamento do projeto e seu funcionamento on-chain, ficou separado da pitch, pois a pitch ficou com o limite de 5 minutos.
+
+---
+
+## 🪧 Pitch
+Youtube: https://youtu.be/PT62cuexYaQ
+
+Drive: https://drive.google.com/drive/u/1/folders/1P9zrLWvveDkjMSehs9FrSRbnCpiFwZU-
+
+Observação: No drive contém o mesmo vídeo do youtube (para backup) e a pitch em PDF, como foi pedido no requisito de entrega, a pitch em PDF também se encontra na pasta docs.
+
+---
+---
 ## 👨‍💻 Autor
 
 Desenvolvido por *Thiago Figueiredo Piazentin*
